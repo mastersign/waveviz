@@ -11,6 +11,9 @@ namespace de.mastersign.waveviz
 {
     public class WaveVisualizer
     {
+        private const float ANTI_ALIAS_FACTOR_X = 3f;
+        private const float ANTI_ALIAS_FACTOR_Y = 2f;
+
         private readonly WaveVisualizingProperties props;
 
         public WaveVisualizer(WaveVisualizingProperties props)
@@ -20,8 +23,9 @@ namespace de.mastersign.waveviz
 
         private float[] GetSampleBlock(int x, ISampleSequence samples)
         {
-            var incStart = (double)x / props.Width;
-            var excEnd = (double)++x / props.Width;
+            var w = props.Width * ANTI_ALIAS_FACTOR_X;
+            var incStart = (double)x / w;
+            var excEnd = (double)++x / w;
             var i0 = (int)Math.Floor(incStart * samples.Count);
             var cnt = (int)Math.Floor(excEnd * samples.Count) - 1 - i0;
             return samples.GetBlock(i0, cnt);
@@ -29,11 +33,13 @@ namespace de.mastersign.waveviz
 
         private void PaintBar(Graphics g, int x, BarInfo barInfo, float scale)
         {
-            var yc = props.Height / 2f;
-            var y11 = yc - barInfo.Max * scale * 0.5f * props.Height;
-            var y12 = yc - barInfo.Min * scale * 0.5f * props.Height;
-            var y21 = yc - barInfo.PosMean * scale * 0.5f * props.Height + 1;
-            var y22 = yc - barInfo.NegMean * scale * 0.5f * props.Height + 1;
+            var w = props.Width * ANTI_ALIAS_FACTOR_X;
+            var h = props.Height * ANTI_ALIAS_FACTOR_Y;
+            var yc = h / 2f;
+            var y11 = yc - barInfo.Max * scale * 0.5f * h;
+            var y12 = yc - barInfo.Min * scale * 0.5f * h;
+            var y21 = yc - barInfo.PosMean * scale * 0.5f * h + 1;
+            var y22 = yc - barInfo.NegMean * scale * 0.5f * h + 1;
             var brush = new SolidBrush(props.ForegroundColor1);
             var posBrush = (int)y11 == (int)y21
                 ? brush : (Brush)new LinearGradientBrush(new Point(0, (int)y21 + 1), new Point(0, (int)y11 - 1),
@@ -41,7 +47,7 @@ namespace de.mastersign.waveviz
             var negBrush = (int)y12 == (int)y22
                 ? brush : (Brush)new LinearGradientBrush(new Point(0, (int)y22 - 1), new Point(0, (int)y12 + 1),
                                     props.ForegroundColor1, props.ForegroundColor2);
-            var linePen = new Pen(props.LineColor, 1f);
+            var linePen = new Pen(props.LineColor, ANTI_ALIAS_FACTOR_Y);
 
             g.SmoothingMode = SmoothingMode.HighSpeed;
             g.FillRectangle(posBrush, x, y11, 1, y21 - y11);
@@ -49,7 +55,7 @@ namespace de.mastersign.waveviz
             g.FillRectangle(brush, x, y21, 1, y22 - y21);
 
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.DrawLine(linePen, 0f, yc, props.Width, yc);
+            g.DrawLine(linePen, 0f, yc, w, yc);
 
             posBrush.Dispose();
             negBrush.Dispose();
@@ -59,21 +65,34 @@ namespace de.mastersign.waveviz
         public Bitmap CreateImage(ISampleSequence samples)
         {
             var bmp = new Bitmap(props.Width, props.Height, PixelFormat.Format32bppArgb);
-            var barInfos = new BarInfo[props.Width];
-            for (var x = 0; x < props.Width; x++)
+            var fullWidth = (int)(props.Width * ANTI_ALIAS_FACTOR_X);
+            var fullHeigth = (int)(props.Height * ANTI_ALIAS_FACTOR_Y);
+            using (var fullBmp = new Bitmap(fullWidth, fullHeigth, PixelFormat.Format32bppArgb))
             {
-                barInfos[x] = new BarInfo(GetSampleBlock(x, samples));
-            }
-            Parallel.For(0, props.Width, x => barInfos[x].Compute());
-            var min = barInfos.Select(bi => bi.Min).Min();
-            var max = barInfos.Select(bi => bi.Max).Max();
-            var scale = 1f / Math.Max(max, -min);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.Clear(props.BackgroundColor);
-                for (var x = 0; x < props.Width; x++)
+                var barInfos = new BarInfo[fullWidth];
+                for (var x = 0; x < fullWidth; x++)
                 {
-                    PaintBar(g, x, barInfos[x], scale);
+                    barInfos[x] = new BarInfo(GetSampleBlock(x, samples));
+                }
+                Parallel.For(0, fullWidth, x => barInfos[x].Compute());
+                var min = barInfos.Select(bi => bi.Min).Min();
+                var max = barInfos.Select(bi => bi.Max).Max();
+                var scale = 1f / Math.Max(max, -min);
+                using (var g = Graphics.FromImage(fullBmp))
+                {
+                    g.Clear(props.BackgroundColor);
+                    for (var x = 0; x < fullWidth; x++)
+                    {
+                        PaintBar(g, x, barInfos[x], scale);
+                    }
+                }
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(fullBmp,
+                        new Rectangle(0, 0, bmp.Width, bmp.Height),
+                        new Rectangle(0, 0, fullBmp.Width, fullBmp.Height),
+                        GraphicsUnit.Pixel);
                 }
             }
             return bmp;
