@@ -11,8 +11,8 @@ namespace de.mastersign.waveviz
 {
     public class WaveVisualizer
     {
-        private const float ANTI_ALIAS_FACTOR_X = 3f;
-        private const float ANTI_ALIAS_FACTOR_Y = 2f;
+        private const float ANTI_ALIAS_FACTOR_X = 5f;
+        private const float ANTI_ALIAS_FACTOR_Y = 1f;
 
         private readonly WaveVisualizingProperties props;
 
